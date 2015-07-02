@@ -54,6 +54,7 @@ static m64p_handle l_ConfigUI = NULL;
 static const char *l_CoreLibPath = NULL;
 static const char *l_ConfigDirPath = NULL;
 static const char *l_ROMFilepath = NULL;       // filepath of ROM to load & run at startup
+static const char *l_DDROMFilepath = NULL;     // filepath of DD IPL ROM to load
 static const char *l_SaveStatePath = NULL;     // save state to load at startup
 
 #if defined(SHAREDIR)
@@ -66,6 +67,7 @@ static int  *l_TestShotList = NULL;      // list of screenshots to take for regr
 static int   l_TestShotIdx = 0;          // index of next screenshot frame in list
 static int   l_SaveOptions = 1;          // save command-line options in configuration file (enabled by default)
 static int   l_CoreCompareMode = 0;      // 0 = disable, 1 = send, 2 = receive
+static int   l_DDROMPresent = 0;         // 0 = not present, 1 = present
 
 static eCheatMode l_CheatMode = CHEAT_DISABLE;
 static char      *l_CheatNumList = NULL;
@@ -277,6 +279,9 @@ static void printUsage(const char *progname)
            "    --core-compare-recv    : use the Core Comparison debugging feature, in data receiving mode\n"
            "    --nosaveoptions        : do not save the given command-line options in configuration file\n"
            "    --verbose              : print lots of information\n"
+           "    --ddrom (filepath)     : load retail 64DD IPL ROM\n"
+           "    --disk (filepath)      : load 64dd disk dump\n"
+           "    --boot (cart/64dd)     : boot cartridge or 64dd IPL\n"
            "    --help                 : see this help message\n\n"
            "(plugin-spec):\n"
            "    (pluginname)           : filename (without path) of plugin to find in plugin directory\n"
@@ -587,6 +592,11 @@ static m64p_error ParseCommandLineFinal(int argc, const char **argv)
         {
             l_SaveOptions = 0;
         }
+        else if (strcmp(argv[i], "--ddrom") == 0)
+        {
+            l_DDROMFilepath = argv[i+1];
+            l_DDROMPresent = 1;
+        }
         else if (ArgsLeft == 0)
         {
             /* this is the last arg, it should be a ROM filename */
@@ -735,6 +745,55 @@ int main(int argc, char *argv[])
         return 10;
     }
     free(ROM_buffer); /* the core copies the ROM image, so we can release this buffer immediately */
+
+    if (l_DDROMPresent == 1)
+    {
+        /* load DD IPL ROM image */
+        FILE *fPtr = fopen(l_DDROMFilepath, "rb");
+        if (fPtr == NULL)
+        {
+            DebugMessage(M64MSG_ERROR, "couldn't open DDROM file '%s' for reading.", l_DDROMFilepath);
+            (*CoreShutdown)();
+            DetachCoreLib();
+            return 7;
+        }
+
+        /* get the length of the ROM, allocate memory buffer, load it from disk */
+        long romlength = 0;
+        fseek(fPtr, 0L, SEEK_END);
+        romlength = ftell(fPtr);
+        fseek(fPtr, 0L, SEEK_SET);
+        unsigned char *DDROM_buffer = (unsigned char *)malloc(romlength);
+        if (DDROM_buffer == NULL)
+        {
+            DebugMessage(M64MSG_ERROR, "couldn't allocate %li-byte buffer for DDROM image file '%s'.", romlength, l_DDROMFilepath);
+            fclose(fPtr);
+            (*CoreShutdown)();
+            DetachCoreLib();
+            return 8;
+        }
+        else if (fread(DDROM_buffer, 1, romlength, fPtr) != romlength)
+        {
+            DebugMessage(M64MSG_ERROR, "couldn't read %li bytes from ROM image file '%s'.", romlength, l_DDROMFilepath);
+            free(DDROM_buffer);
+            fclose(fPtr);
+            (*CoreShutdown)();
+            DetachCoreLib();
+            return 9;
+        }
+        fclose(fPtr);
+
+        /* Try to load the ROM image into the core */
+        if ((*CoreDoCommand)(M64CMD_DDROM_OPEN, (int)romlength, DDROM_buffer) != M64ERR_SUCCESS)
+        {
+            DebugMessage(M64MSG_ERROR, "core failed to open ROM image file '%s'.", l_DDROMFilepath);
+            free(DDROM_buffer);
+            (*CoreShutdown)();
+            DetachCoreLib();
+            return 10;
+        }
+        free(DDROM_buffer); /* the core copies the ROM image, so we can release this buffer immediately */
+    }
 
     /* handle the cheat codes */
     CheatStart(l_CheatMode, l_CheatNumList);
