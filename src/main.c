@@ -68,6 +68,8 @@ static int   l_TestShotIdx = 0;          // index of next screenshot frame in li
 static int   l_SaveOptions = 1;          // save command-line options in configuration file (enabled by default)
 static int   l_CoreCompareMode = 0;      // 0 = disable, 1 = send, 2 = receive
 static int   l_DDROMPresent = 0;         // 0 = not present, 1 = present
+static int   l_BootDevice = 0;           // 0 = cart, 1 = 64DD IPL
+static bool  l_Enable64DD = false;       // 0 = 64DD emulation disabled, 1 = enabled
 
 static eCheatMode l_CheatMode = CHEAT_DISABLE;
 static char      *l_CheatNumList = NULL;
@@ -279,9 +281,10 @@ static void printUsage(const char *progname)
            "    --core-compare-recv    : use the Core Comparison debugging feature, in data receiving mode\n"
            "    --nosaveoptions        : do not save the given command-line options in configuration file\n"
            "    --verbose              : print lots of information\n"
+           "    --64dd                 : enable 64DD emulation\n"
            "    --ddrom (filepath)     : load retail 64DD IPL ROM\n"
-           "    --disk (filepath)      : load 64dd disk dump\n"
-           "    --boot (cart/64dd)     : boot cartridge or 64dd IPL\n"
+           "    --disk (filepath)      : load 64DD disk dump\n"
+           "    --boot (cart/64dd)     : boot cartridge or 64DD IPL\n"
            "    --help                 : see this help message\n\n"
            "(plugin-spec):\n"
            "    (pluginname)           : filename (without path) of plugin to find in plugin directory\n"
@@ -592,15 +595,44 @@ static m64p_error ParseCommandLineFinal(int argc, const char **argv)
         {
             l_SaveOptions = 0;
         }
+        else if (strcmp(argv[i], "--64dd") == 0)
+        {
+            l_Enable64DD = true;
+        }
         else if (strcmp(argv[i], "--ddrom") == 0)
         {
             l_DDROMFilepath = argv[i+1];
             l_DDROMPresent = 1;
+            i++;
+        }
+        else if (strcmp(argv[i], "--boot") == 0)
+        {
+            i++;
+            if (strcmp(argv[i], "cart") == 0)
+                l_BootDevice = 0;
+            else if (strcmp(argv[i], "64dd") == 0)
+                l_BootDevice = 1;
+            else
+            {
+                DebugMessage(M64MSG_ERROR, "--boot: unknown device");
+                return M64ERR_INPUT_INVALID;
+            }
+            (*ConfigSetParameter)(l_ConfigCore, "BootDevice", M64TYPE_INT, &l_BootDevice);
         }
         else if (ArgsLeft == 0)
         {
             /* this is the last arg, it should be a ROM filename */
             l_ROMFilepath = argv[i];
+
+            if (l_BootDevice == 1 && l_DDROMPresent != 1)
+            {
+                DebugMessage(M64MSG_ERROR, "Booting 64DD IPL but no IPL filepath given");
+                return M64ERR_INPUT_INVALID;
+            }
+
+            //Enable 64DD emulation if --64dd found
+            (*ConfigSetParameter)(l_ConfigCore, "64DD", M64TYPE_BOOL, &l_Enable64DD);
+
             return M64ERR_SUCCESS;
         }
         else if (strcmp(argv[i], "--verbose") == 0)
