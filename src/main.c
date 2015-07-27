@@ -55,6 +55,7 @@ static const char *l_CoreLibPath = NULL;
 static const char *l_ConfigDirPath = NULL;
 static const char *l_ROMFilepath = NULL;       // filepath of ROM to load & run at startup
 static const char *l_DDROMFilepath = NULL;     // filepath of DD IPL ROM to load
+static const char *l_DDDiskFilepath = NULL;     // filepath of DD Disk to load
 static const char *l_SaveStatePath = NULL;     // save state to load at startup
 
 #if defined(SHAREDIR)
@@ -68,6 +69,7 @@ static int   l_TestShotIdx = 0;          // index of next screenshot frame in li
 static int   l_SaveOptions = 1;          // save command-line options in configuration file (enabled by default)
 static int   l_CoreCompareMode = 0;      // 0 = disable, 1 = send, 2 = receive
 static int   l_DDROMPresent = 0;         // 0 = not present, 1 = present
+static int   l_DDDiskPresent = 0;         // 0 = not present, 1 = present
 static int   l_BootDevice = 0;           // 0 = cart, 1 = 64DD IPL
 static bool  l_Enable64DD = false;       // 0 = 64DD emulation disabled, 1 = enabled
 
@@ -605,6 +607,12 @@ static m64p_error ParseCommandLineFinal(int argc, const char **argv)
             l_DDROMPresent = 1;
             i++;
         }
+		else if (strcmp(argv[i], "--disk") == 0)
+		{
+			l_DDDiskFilepath = argv[i + 1];
+			l_DDDiskPresent = 1;
+			i++;
+		}
         else if (strcmp(argv[i], "--boot") == 0)
         {
             i++;
@@ -806,7 +814,7 @@ int main(int argc, char *argv[])
         }
         else if (fread(DDROM_buffer, 1, romlength, fPtr) != romlength)
         {
-            DebugMessage(M64MSG_ERROR, "couldn't read %li bytes from ROM image file '%s'.", romlength, l_DDROMFilepath);
+            DebugMessage(M64MSG_ERROR, "couldn't read %li bytes from DDROM image file '%s'.", romlength, l_DDROMFilepath);
             free(DDROM_buffer);
             fclose(fPtr);
             (*CoreShutdown)();
@@ -818,7 +826,7 @@ int main(int argc, char *argv[])
         /* Try to load the ROM image into the core */
         if ((*CoreDoCommand)(M64CMD_DDROM_OPEN, (int)romlength, DDROM_buffer) != M64ERR_SUCCESS)
         {
-            DebugMessage(M64MSG_ERROR, "core failed to open ROM image file '%s'.", l_DDROMFilepath);
+            DebugMessage(M64MSG_ERROR, "core failed to open DDROM image file '%s'.", l_DDROMFilepath);
             free(DDROM_buffer);
             (*CoreShutdown)();
             DetachCoreLib();
@@ -826,6 +834,55 @@ int main(int argc, char *argv[])
         }
         free(DDROM_buffer); /* the core copies the ROM image, so we can release this buffer immediately */
     }
+
+	if (l_DDDiskPresent == 1)
+	{
+		/* load DD Disk image */
+		FILE *fPtr = fopen(l_DDDiskFilepath, "rb");
+		if (fPtr == NULL)
+		{
+			DebugMessage(M64MSG_ERROR, "couldn't open disk file '%s' for reading.", l_DDDiskFilepath);
+			(*CoreShutdown)();
+			DetachCoreLib();
+			return 7;
+		}
+
+		/* get the length of the ROM, allocate memory buffer, load it from disk */
+		long romlength = 0;
+		fseek(fPtr, 0L, SEEK_END);
+		romlength = ftell(fPtr);
+		fseek(fPtr, 0L, SEEK_SET);
+		unsigned char *DDDisk_buffer = (unsigned char *)malloc(romlength);
+		if (DDDisk_buffer == NULL)
+		{
+			DebugMessage(M64MSG_ERROR, "couldn't allocate %li-byte buffer for disk image file '%s'.", romlength, l_DDDiskFilepath);
+			fclose(fPtr);
+			(*CoreShutdown)();
+			DetachCoreLib();
+			return 8;
+		}
+		else if (fread(DDDisk_buffer, 1, romlength, fPtr) != romlength)
+		{
+			DebugMessage(M64MSG_ERROR, "couldn't read %li bytes from disk image file '%s'.", romlength, l_DDDiskFilepath);
+			free(DDDisk_buffer);
+			fclose(fPtr);
+			(*CoreShutdown)();
+			DetachCoreLib();
+			return 9;
+		}
+		fclose(fPtr);
+
+		/* Try to load the ROM image into the core */
+		if ((*CoreDoCommand)(M64CMD_DISK_OPEN, (int)romlength, DDDisk_buffer) != M64ERR_SUCCESS)
+		{
+			DebugMessage(M64MSG_ERROR, "core failed to open disk image file '%s'.", l_DDDiskFilepath);
+			free(DDDisk_buffer);
+			(*CoreShutdown)();
+			DetachCoreLib();
+			return 10;
+		}
+		free(DDDisk_buffer); /* the core copies the ROM image, so we can release this buffer immediately */
+	}
 
     /* handle the cheat codes */
     CheatStart(l_CheatMode, l_CheatNumList);
